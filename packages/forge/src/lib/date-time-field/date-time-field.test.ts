@@ -33,6 +33,7 @@ function firePickerChange(picker: IDateTimePickerComponent, detail: Partial<IDat
   const fullDetail: IDateTimePickerChangeEventData = {
     value: null,
     date: null,
+    dateTo: null,
     time: null,
     from: null,
     to: null,
@@ -103,6 +104,33 @@ describe('DateTimeField / rendering (standalone)', () => {
     await ready(el);
     expect(getDateInput(el).value).toContain('2025');
     expect(getTimeInput(el).value).toContain('10:30');
+  });
+
+  it('should focus the nearest input when clicking empty field space to the right of the inputs', async () => {
+    const screen = render(html`<forge-date-time-field time-mode="single"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    const timeInput = getTimeInput(el);
+    const field = el.shadowRoot!.querySelector('forge-text-field') as HTMLElement;
+    const rect = timeInput.getBoundingClientRect();
+    // Click in the trailing dead zone: to the right of the last input, on the input row.
+    field.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, composed: true, cancelable: true, clientX: rect.right + 80, clientY: (rect.top + rect.bottom) / 2 })
+    );
+    expect(el.shadowRoot!.activeElement).toBe(timeInput);
+  });
+
+  it('should focus the date input when clicking empty field space to the left of the inputs', async () => {
+    const screen = render(html`<forge-date-time-field time-mode="single"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    const dateInput = getDateInput(el);
+    const field = el.shadowRoot!.querySelector('forge-text-field') as HTMLElement;
+    const rect = dateInput.getBoundingClientRect();
+    field.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, composed: true, cancelable: true, clientX: rect.left + 4, clientY: (rect.top + rect.bottom) / 2 })
+    );
+    expect(el.shadowRoot!.activeElement).toBe(dateInput);
   });
 });
 
@@ -537,5 +565,531 @@ describe('DateTimeField / form association', () => {
     form.reset();
     await ready(el);
     expect(el.value).toBeNull();
+  });
+});
+
+// ─── Date-mode range ──────────────────────────────────────────────────────────
+
+describe('DateTimeField / date-mode range', () => {
+  it('should render two date inputs when date-mode is range', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="range"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    expect(el.shadowRoot!.querySelector('[part="date-input"]')).not.toBeNull();
+    expect(el.shadowRoot!.querySelector('[part="to-date-input"]')).not.toBeNull();
+  });
+
+  it('should render one date input when date-mode is single', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="single" time-mode="range"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    expect(el.shadowRoot!.querySelector('[part="date-input"]')).not.toBeNull();
+    expect(el.shadowRoot!.querySelector('[part="to-date-input"]')).toBeNull();
+  });
+
+  it('should reflect a two-date range value into both date masks when set programmatically', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = { from: new Date(2025, 5, 9, 9, 0), to: new Date(2025, 5, 12, 17, 0) };
+    await ready(el);
+    const dateInput = el.shadowRoot!.querySelector('[part="date-input"]') as HTMLInputElement;
+    const toDateInput = el.shadowRoot!.querySelector('[part="to-date-input"]') as HTMLInputElement;
+    expect(dateInput.value).toContain('06/09/2025');
+    expect(toDateInput.value).toContain('06/12/2025');
+  });
+
+  it('should produce a {from,to} with distinct dates from typed entry', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    const events: IDateTimeFieldChangeEventData[] = [];
+    el.addEventListener('forge-date-time-field-change', e => events.push((e as CustomEvent<IDateTimeFieldChangeEventData>).detail));
+    el.value = { from: new Date(2025, 5, 9, 9, 0), to: new Date(2025, 5, 12, 17, 0) };
+    await ready(el);
+    const v = el.value as { from: Date; to: Date };
+    expect(v.from.getDate()).toBe(9);
+    expect(v.to.getDate()).toBe(12);
+    expect(v.from.getMonth()).toBe(5);
+    expect(v.to.getMonth()).toBe(5);
+  });
+
+  it('should keep same-day time-range working when date-mode=single, time-mode=range', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="single" time-mode="range" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = { from: new Date(2025, 5, 12, 9, 0), to: new Date(2025, 5, 12, 17, 0) };
+    await ready(el);
+    const v = el.value as { from: Date; to: Date };
+    expect(v.from.getDate()).toBe(12);
+    expect(v.to.getDate()).toBe(12);
+    expect(v.from.getHours()).toBe(9);
+    expect(v.to.getHours()).toBe(17);
+    expect(el.shadowRoot!.querySelector('[part="to-date-input"]')).toBeNull();
+  });
+});
+
+// ─── End-after-start validation ───────────────────────────────────────────────
+
+describe('DateTimeField / end-after-start validation', () => {
+  it('should flag customError with message "End must be after start." when end is before start', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = { from: new Date('2024-06-12T17:00:00'), to: new Date('2024-06-09T09:00:00') };
+    await ready(el);
+    expect(el.validity.customError).toBe(true);
+    expect(el.validationMessage).toBe('End must be after start.');
+    expect(el.checkValidity()).toBe(false);
+  });
+
+  it('should be valid when end is after start or equal', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = { from: new Date('2024-06-09T09:00:00'), to: new Date('2024-06-12T17:00:00') };
+    await ready(el);
+    expect(el.validity.customError).toBe(false);
+    expect(el.checkValidity()).toBe(true);
+    el.value = { from: new Date('2024-06-12T09:00:00'), to: new Date('2024-06-12T09:00:00') };
+    await ready(el);
+    expect(el.validity.customError).toBe(false);
+    expect(el.checkValidity()).toBe(true);
+  });
+
+  it('should report valueMissing (not customError) when one range end date is empty and required', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="range" required value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    const dateInput = el.shadowRoot!.querySelector('[part="date-input"]') as HTMLInputElement;
+    dateInput.focus();
+    dateInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true }));
+    await ready(el);
+    expect(el.validity.valueMissing).toBe(true);
+    expect(el.validity.customError).toBe(false);
+    expect(el.checkValidity()).toBe(false);
+  });
+
+  it('should keep single-mode validity unchanged when required and empty (regression)', async () => {
+    const screen = render(html`<forge-date-time-field required value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    expect(el.validity.valueMissing).toBe(true);
+    expect(el.validity.customError).toBe(false);
+  });
+});
+
+// ─── T-F5: Duration chip ──────────────────────────────────────────────────────
+
+describe('DateTimeField / duration chip (T-F5)', () => {
+  it('should display a duration summary on the closed field when a multi-day range is committed', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = { from: new Date(2025, 5, 12, 9, 0), to: new Date(2025, 5, 15, 17, 0) };
+    await ready(el);
+    const chip = el.shadowRoot!.querySelector('[part="duration"]');
+    expect(chip).not.toBeNull();
+    expect(chip!.textContent).toMatch(/3\s*day/);
+    expect(chip!.textContent).toMatch(/8\s*hour/);
+  });
+
+  it('should NOT display a duration chip for a single (scalar) value', async () => {
+    const screen = render(html`<forge-date-time-field value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = new Date(2025, 5, 12, 9, 0);
+    await ready(el);
+    expect(el.shadowRoot!.querySelector('[part="duration"]')).toBeNull();
+  });
+
+  it('should update the duration text when the range value changes', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = { from: new Date(2025, 5, 12, 9, 0), to: new Date(2025, 5, 15, 17, 0) };
+    await ready(el);
+    const firstText = el.shadowRoot!.querySelector('[part="duration"]')!.textContent;
+    el.value = { from: new Date(2025, 5, 12, 9, 0), to: new Date(2025, 5, 13, 9, 0) };
+    await ready(el);
+    const secondText = el.shadowRoot!.querySelector('[part="duration"]')!.textContent;
+    expect(secondText).not.toBe(firstText);
+    expect(secondText).toMatch(/1\s*day/);
+  });
+
+  it('should not display the duration chip when end is before start (invalid range)', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = { from: new Date(2025, 5, 15, 17, 0), to: new Date(2025, 5, 12, 9, 0) };
+    await ready(el);
+    expect(el.shadowRoot!.querySelector('[part="duration"]')).toBeNull();
+  });
+});
+
+// ─── T-F4: Link contract under deferred commit ────────────────────────────────
+
+describe('DateTimeField / link contract (T-F4)', () => {
+  it('should update field value and reflect both date masks and time masks when picker fires a complete two-date range change', async () => {
+    const screen = render(html`
+      <div>
+        <forge-date-time-field picker="p1" date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>
+        <forge-date-time-picker id="p1" date-mode="range" time-mode="range"></forge-date-time-picker>
+      </div>
+    `);
+    const el = getField(screen.container);
+    const picker = getPicker(screen.container);
+    await ready(el);
+    const from = new Date(2026, 5, 9, 9, 0);
+    const to = new Date(2026, 5, 12, 17, 0);
+    firePickerChange(picker, { value: { from, to }, source: 'apply', complete: true });
+    await ready(el);
+    const v = el.value as { from: Date; to: Date };
+    expect(v.from.getDate()).toBe(9);
+    expect(v.to.getDate()).toBe(12);
+    const dateInput = el.shadowRoot!.querySelector('[part="date-input"]') as HTMLInputElement;
+    const toDateInput = el.shadowRoot!.querySelector('[part="to-date-input"]') as HTMLInputElement;
+    expect(dateInput.value).toContain('06/09/2026');
+    expect(toDateInput.value).toContain('06/12/2026');
+    const fromInput = el.shadowRoot!.querySelector('[part="from-input"]') as HTMLInputElement;
+    const toInput = el.shadowRoot!.querySelector('[part="to-input"]') as HTMLInputElement;
+    expect(fromInput.value).toMatch(/\d/);
+    expect(toInput.value).toMatch(/\d/);
+  });
+
+  it('should close the linked picker when an Apply (complete) change arrives', async () => {
+    const screen = render(html`
+      <div>
+        <forge-date-time-field picker="p1" date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>
+        <forge-date-time-picker id="p1" date-mode="range" time-mode="range"></forge-date-time-picker>
+      </div>
+    `);
+    const el = getField(screen.container);
+    const picker = getPicker(screen.container);
+    await ready(el);
+    (el.shadowRoot!.querySelector('[part="toggle"]') as HTMLElement).click();
+    await ready(el);
+    expect(picker.open).toBe(true);
+    firePickerChange(picker, {
+      value: { from: new Date(2026, 5, 9, 9, 0), to: new Date(2026, 5, 12, 17, 0) },
+      source: 'apply',
+      complete: true
+    });
+    await ready(el);
+    expect(picker.open).toBe(false);
+    expect(el.open).toBe(false);
+  });
+
+  it('should not push field value into the picker while the picker is open', async () => {
+    const screen = render(html`
+      <div>
+        <forge-date-time-field picker="p1" value-mode="date"></forge-date-time-field>
+        <forge-date-time-picker id="p1" value-mode="date"></forge-date-time-picker>
+      </div>
+    `);
+    const el = getField(screen.container);
+    const picker = getPicker(screen.container);
+    await ready(el);
+    const initial = new Date(2026, 5, 1, 10, 0);
+    picker.value = initial;
+    await ready(el);
+    (el.shadowRoot!.querySelector('[part="toggle"]') as HTMLElement).click();
+    await ready(el);
+    expect(el.open).toBe(true);
+    const dateInput = el.shadowRoot!.querySelector('[part="date-input"]') as HTMLInputElement;
+    dateInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true }));
+    await ready(el);
+    expect((picker.value as Date)?.getTime()).toBe(initial.getTime());
+  });
+
+  it('should warn when field date-mode and picker date-mode disagree', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const screen = render(html`
+      <div>
+        <forge-date-time-field picker="p1" date-mode="range"></forge-date-time-field>
+        <forge-date-time-picker id="p1" date-mode="single"></forge-date-time-picker>
+      </div>
+    `);
+    const el = getField(screen.container);
+    await ready(el);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('date-mode'));
+    warnSpy.mockRestore();
+  });
+
+  it('should fire exactly one field change per picker change', async () => {
+    const screen = render(html`
+      <div>
+        <forge-date-time-field picker="p1" date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>
+        <forge-date-time-picker id="p1" date-mode="range" time-mode="range"></forge-date-time-picker>
+      </div>
+    `);
+    const el = getField(screen.container);
+    const picker = getPicker(screen.container);
+    await ready(el);
+    const events: IDateTimeFieldChangeEventData[] = [];
+    el.addEventListener('forge-date-time-field-change', e => events.push((e as CustomEvent<IDateTimeFieldChangeEventData>).detail));
+    firePickerChange(picker, {
+      value: { from: new Date(2026, 5, 9, 9, 0), to: new Date(2026, 5, 12, 17, 0) },
+      source: 'apply',
+      complete: true
+    });
+    await ready(el);
+    expect(events.length).toBe(1);
+  });
+});
+
+// ─── Form value + restore round-trip ────────────────────────────────────────
+
+describe('DateTimeField / form value + restore round-trip', () => {
+  it('should contribute distinct .from and .to ISO datetimes to FormData for a multi-day range', async () => {
+    const screen = render(
+      html`<form>
+        <forge-date-time-field name="appt" date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>
+      </form>`
+    );
+    const form = screen.container.querySelector('form') as HTMLFormElement;
+    const el = form.querySelector('forge-date-time-field') as IDateTimeFieldComponent;
+    await ready(el);
+    el.value = { from: new Date(2025, 5, 9, 9, 0), to: new Date(2025, 5, 12, 17, 0) };
+    await ready(el);
+    const fd = new FormData(form);
+    const fromStr = fd.get('appt.from') as string;
+    const toStr = fd.get('appt.to') as string;
+    expect(typeof fromStr).toBe('string');
+    expect(typeof toStr).toBe('string');
+    expect(fromStr).toContain('2025');
+    expect(toStr).toContain('2025');
+    const fromDate = new Date(fromStr);
+    const toDate = new Date(toStr);
+    expect(fromDate.getDate()).not.toBe(toDate.getDate());
+    expect(fromDate.getDate()).toBe(9);
+    expect(toDate.getDate()).toBe(12);
+  });
+
+  it('should restore a two-date range from form state via formStateRestoreCallback', async () => {
+    const screen = render(
+      html`<form>
+        <forge-date-time-field name="appt" date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>
+      </form>`
+    );
+    const form = screen.container.querySelector('form') as HTMLFormElement;
+    const el = form.querySelector('forge-date-time-field') as IDateTimeFieldComponent;
+    await ready(el);
+    const state = new FormData();
+    state.append('appt.from', new Date(2025, 5, 9, 9, 0).toISOString());
+    state.append('appt.to', new Date(2025, 5, 12, 17, 0).toISOString());
+    el.formStateRestoreCallback(state);
+    await ready(el);
+    const v = el.value as { from: Date; to: Date };
+    expect(v).not.toBeNull();
+    expect(v.from).toBeInstanceOf(Date);
+    expect(v.to).toBeInstanceOf(Date);
+    expect(v.from.getDate()).toBe(9);
+    expect(v.to.getDate()).toBe(12);
+    expect(v.from.getDate()).not.toBe(v.to.getDate());
+  });
+});
+
+// ─── Orthogonal modes ────────────────────────────────────────────────────────
+
+describe('DateTimeField / orthogonal modes', () => {
+  it('should be a scalar Date when date-mode=single and time-mode=single', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="single" time-mode="single" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = new Date(2025, 5, 12, 10, 30);
+    await ready(el);
+    expect(el.value).toBeInstanceOf(Date);
+    expect((el.value as Date).getFullYear()).toBe(2025);
+  });
+
+  it('should be a {from,to} with same day and two times when date-mode=single, time-mode=range', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="single" time-mode="range" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = { from: new Date(2025, 5, 12, 9, 0), to: new Date(2025, 5, 12, 17, 0) };
+    await ready(el);
+    const v = el.value as { from: Date; to: Date };
+    expect(v.from).toBeInstanceOf(Date);
+    expect(v.to).toBeInstanceOf(Date);
+    expect(v.from.getDate()).toBe(v.to.getDate());
+    expect(v.from.getHours()).toBe(9);
+    expect(v.to.getHours()).toBe(17);
+  });
+
+  it('should be a {from,to} with two days and one shared time when date-mode=range, time-mode=single', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="single" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = { from: new Date(2025, 5, 9, 9, 0), to: new Date(2025, 5, 12, 9, 0) };
+    await ready(el);
+    const v = el.value as { from: Date; to: Date };
+    expect(v.from).toBeInstanceOf(Date);
+    expect(v.to).toBeInstanceOf(Date);
+    expect(v.from.getDate()).not.toBe(v.to.getDate());
+    expect(v.from.getDate()).toBe(9);
+    expect(v.to.getDate()).toBe(12);
+    expect(v.from.getHours()).toBe(v.to.getHours());
+    expect(el.shadowRoot!.querySelector('[part="to-date-input"]')).not.toBeNull();
+    expect(el.shadowRoot!.querySelector('[part="time-input"]')).not.toBeNull();
+    expect(el.shadowRoot!.querySelector('[part="from-input"]')).toBeNull();
+  });
+
+  it('should be a {from,to} with two days and two times when date-mode=range, time-mode=range', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="range" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    el.value = { from: new Date(2025, 5, 9, 9, 0), to: new Date(2025, 5, 12, 17, 0) };
+    await ready(el);
+    const v = el.value as { from: Date; to: Date };
+    expect(v.from.getDate()).toBe(9);
+    expect(v.to.getDate()).toBe(12);
+    expect(v.from.getHours()).toBe(9);
+    expect(v.to.getHours()).toBe(17);
+    expect(el.shadowRoot!.querySelector('[part="to-date-input"]')).not.toBeNull();
+    expect(el.shadowRoot!.querySelector('[part="from-input"]')).not.toBeNull();
+    expect(el.shadowRoot!.querySelector('[part="to-input"]')).not.toBeNull();
+  });
+
+  it('should remain usable standalone (unlinked) in date-mode=range', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="single" value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    expect(el.shadowRoot!.querySelector('[part="toggle"]')).toBeNull();
+    el.value = { from: new Date(2025, 5, 9, 10, 0), to: new Date(2025, 5, 12, 10, 0) };
+    await ready(el);
+    expect(el.checkValidity()).toBe(true);
+    const v = el.value as { from: Date; to: Date };
+    expect(v.from.getDate()).toBe(9);
+    expect(v.to.getDate()).toBe(12);
+  });
+});
+
+// ─── Review fixes ────────────────────────────────────────────────────────────
+
+describe('DateTimeField / review fixes', () => {
+  it('should be valid when a complete date-range + single time is typed (date-mode=range, time-mode=single, required)', async () => {
+    const screen = render(html`<forge-date-time-field date-mode="range" time-mode="single" required value-mode="date"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    const dateInput = el.shadowRoot!.querySelector('[part="date-input"]') as HTMLInputElement;
+    const toDateInput = el.shadowRoot!.querySelector('[part="to-date-input"]') as HTMLInputElement;
+    const timeInput = getTimeInput(el);
+    dateInput.focus();
+    dateInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true }));
+    await ready(el);
+    toDateInput.focus();
+    toDateInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true }));
+    await ready(el);
+    timeInput.focus();
+    timeInput.dispatchEvent(new KeyboardEvent('keydown', { key: 't', bubbles: true }));
+    await ready(el);
+    expect(el.value).not.toBeNull();
+    expect(el.validity.valueMissing).toBe(false);
+    expect(el.checkValidity()).toBe(true);
+  });
+
+  it('should report "Time is required." (not a missing date) when a linked picker reports both range dates but no time', async () => {
+    const screen = render(
+      html`<div>
+        <forge-date-time-field picker="p1" date-mode="range" time-mode="single" required value-mode="date"></forge-date-time-field>
+        <forge-date-time-picker id="p1" date-mode="range" time-mode="single"></forge-date-time-picker>
+      </div>`
+    );
+    const el = getField(screen.container);
+    const picker = getPicker(screen.container);
+    await ready(el);
+    firePickerChange(picker, {
+      date: new Date(2026, 5, 9),
+      dateTo: new Date(2026, 5, 12),
+      time: null,
+      complete: false
+    });
+    await ready(el);
+    expect(el.validity.valueMissing).toBe(true);
+    expect(el.validationMessage).toBe('Time is required.');
+  });
+
+  it('should expose aria-expanded on the toggle reflecting the picker open state', async () => {
+    const screen = render(html`
+      <div>
+        <forge-date-time-field picker="p1"></forge-date-time-field>
+        <forge-date-time-picker id="p1"></forge-date-time-picker>
+      </div>
+    `);
+    const el = getField(screen.container);
+    await ready(el);
+    const toggle = el.shadowRoot!.querySelector('[part="toggle"]') as HTMLElement;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    toggle.click();
+    await ready(el);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('should forward a range value to a mode-mismatched picker instead of coercing it to null', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const screen = render(html`
+      <div>
+        <forge-date-time-field picker="p1" date-mode="range" time-mode="single" value-mode="date"></forge-date-time-field>
+        <forge-date-time-picker id="p1"></forge-date-time-picker>
+      </div>
+    `);
+    const el = getField(screen.container);
+    const picker = getPicker(screen.container);
+    await ready(el);
+    el.value = { from: new Date(2026, 5, 9, 9, 0), to: new Date(2026, 5, 12, 9, 0) };
+    await ready(el);
+    const pickerValue = picker.value as { from: Date; to: Date } | null;
+    expect(pickerValue).not.toBeNull();
+    expect(pickerValue!.from.getDate()).toBe(9);
+    expect(pickerValue!.to.getDate()).toBe(12);
+    warnSpy.mockRestore();
+  });
+
+  it('should close a linked picker when it is unlinked while open', async () => {
+    const screen = render(html`
+      <div>
+        <forge-date-time-field picker="p1"></forge-date-time-field>
+        <forge-date-time-picker id="p1"></forge-date-time-picker>
+        <forge-date-time-picker id="p2"></forge-date-time-picker>
+      </div>
+    `);
+    const el = getField(screen.container);
+    const p1 = screen.container.querySelector('#p1') as IDateTimePickerComponent;
+    const p2 = screen.container.querySelector('#p2') as IDateTimePickerComponent;
+    await ready(el);
+    (el.shadowRoot!.querySelector('[part="toggle"]') as HTMLElement).click();
+    await ready(el);
+    expect(p1.open).toBe(true);
+    el.pickerElement = p2;
+    await ready(el);
+    expect(p1.open).toBe(false);
+  });
+
+  it('should disable and close the linked picker when the field becomes disabled', async () => {
+    const screen = render(html`
+      <div>
+        <forge-date-time-field picker="p1"></forge-date-time-field>
+        <forge-date-time-picker id="p1"></forge-date-time-picker>
+      </div>
+    `);
+    const el = getField(screen.container);
+    const picker = getPicker(screen.container);
+    await ready(el);
+    (el.shadowRoot!.querySelector('[part="toggle"]') as HTMLElement).click();
+    await ready(el);
+    expect(picker.open).toBe(true);
+    el.disabled = true;
+    await ready(el);
+    expect(picker.disabled).toBe(true);
+    expect(picker.open).toBe(false);
+  });
+
+  it('should give the role=group host an accessible name from the label', async () => {
+    const screen = render(html`<forge-date-time-field label="Appointment"></forge-date-time-field>`);
+    const el = getField(screen.container);
+    await ready(el);
+    expect(el.getAttribute('role')).toBe('group');
+    expect(el.getAttribute('aria-label')).toBe('Appointment');
   });
 });

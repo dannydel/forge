@@ -6,6 +6,8 @@ const elementName: keyof HTMLElementTagNameMap = `${COMPONENT_NAME_PREFIX}date-t
 
 const observedAttributes = {
   TIME_MODE: 'time-mode',
+  DATE_MODE: 'date-mode',
+  AUTO_COMMIT: 'auto-commit',
   VALUE_MODE: 'value-mode',
   NAME: 'name',
   DISABLED: 'disabled',
@@ -32,7 +34,8 @@ const observedAttributes = {
   ANCHOR: 'anchor',
   OPEN: 'open',
   PLACEMENT: 'placement',
-  PERSISTENT: 'persistent'
+  PERSISTENT: 'persistent',
+  PRESETS: 'presets'
 } as const;
 
 const attributes = {
@@ -68,7 +71,10 @@ const parts = {
   FOOTER_START: 'footer-start',
   FOOTER_CENTER: 'footer-center',
   FOOTER_END: 'footer-end',
-  LIVE_REGION: 'live-region'
+  LIVE_REGION: 'live-region',
+  PRESETS: 'presets',
+  PRESET: 'preset',
+  DURATION: 'duration'
 } as const;
 
 const events = {
@@ -79,6 +85,7 @@ const events = {
 
 const defaultValues = {
   TIME_MODE: 'single',
+  DATE_MODE: 'single',
   VALUE_MODE: 'temporal',
   ORIENTATION: 'auto',
   MIN_TIME: '09:00',
@@ -101,16 +108,20 @@ export const DATE_TIME_PICKER_CONSTANTS = {
   defaultValues
 };
 
+export type DateRangePresetId = 'today' | 'this-week' | 'next-7-days' | 'this-month';
+
 /** Shape of the public `value` (and change-event `value`): a `Temporal.PlainDateTime`, a local ISO `datetime-local` string, or a `Date`. */
 export type DateTimePickerValueMode = 'temporal' | 'iso' | 'date';
 
 export type TimeMode = 'single' | 'range' | 'slots';
 
+export type DateMode = 'single' | 'range';
+
 export type Orientation = 'auto' | 'horizontal' | 'vertical';
 
 export type ResolvedOrientation = 'horizontal' | 'vertical';
 
-export type ChangeSource = 'date' | 'time' | 'time-from' | 'time-to' | 'slot' | 'clear' | 'mode-change' | 'initial';
+export type ChangeSource = 'date' | 'time' | 'time-from' | 'time-to' | 'slot' | 'clear' | 'mode-change' | 'initial' | 'apply' | 'cancel' | 'preset';
 
 export interface ITimeSlot {
   /** Time of day as 'HH:mm' or 'HH:mm:ss' (24-hour). */
@@ -143,7 +154,10 @@ export type DisableSlotCallback = (date: Date, slot: ITimeSlot) => boolean;
 
 export interface IDateTimePickerChangeEventData {
   value: DateTimePickerPublicValue;
+  /** The start (or only) selected calendar date. */
   date: Date | null;
+  /** The end calendar date in `date-mode="range"`; `null` otherwise. */
+  dateTo: Date | null;
   time: string | null;
   from: string | null;
   to: string | null;

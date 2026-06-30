@@ -4,6 +4,7 @@ import type { DateTimePickerPublicValue } from '../date-time-picker/date-time-pi
 const elementName: keyof HTMLElementTagNameMap = `${COMPONENT_NAME_PREFIX}date-time-field`;
 
 const observedAttributes = {
+  DATE_MODE: 'date-mode',
   TIME_MODE: 'time-mode',
   VALUE_MODE: 'value-mode',
   NAME: 'name',
@@ -37,7 +38,9 @@ const slots = {
 const parts = {
   FIELD: 'field',
   INPUT: 'input',
-  TOGGLE: 'toggle'
+  TOGGLE: 'toggle',
+  TO_DATE_INPUT: 'to-date-input',
+  DURATION: 'duration'
 } as const;
 
 const events = {
@@ -47,10 +50,15 @@ const events = {
 } as const;
 
 const defaultValues = {
+  DATE_MODE: 'single',
   TIME_MODE: 'single',
   VALUE_MODE: 'temporal',
   REQUIRED_PARTS: 'both',
   POPOVER_PLACEMENT: 'bottom-start'
+} as const;
+
+const messages = {
+  END_BEFORE_START: 'End must be after start.'
 } as const;
 
 export const DATE_TIME_FIELD_CONSTANTS = {
@@ -60,8 +68,11 @@ export const DATE_TIME_FIELD_CONSTANTS = {
   slots,
   parts,
   events,
-  defaultValues
+  defaultValues,
+  MESSAGES: messages
 };
+
+export type DateTimeFieldDateMode = 'single' | 'range';
 
 export type DateTimeFieldRequiredParts = 'both' | 'date' | 'time';
 
